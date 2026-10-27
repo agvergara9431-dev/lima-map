@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lima Places</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Figtree:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: two big tabs at the bottom (Map / Places). Places is a scroll of photo cards in itinerary order. Same palette as the Lima itinerary: Pacific teal, bougainvillea, ochre. */
+  :root {
+    --bg: #F1F5F4;
+    --fg: #12303A;
+    --muted: #5B6F75;
+    --accent: #C02F69;
+    --sea: #1E777D;
+    --ochre: #D9921F;
+    --field: #5F7E2E;
+    --open: #7D8E92;
+    --panel: #FFFFFF;
+    --line: #D6E0DF;
+    --tipbg: #EAF3F3;
+    --font-display: "Gloock", Georgia, serif;
+    --font-body: "Figtree", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "DM Mono", ui-monospace, Menlo, monospace;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 18px; line-height: 1.45; overflow: hidden; display: flex; flex-direction: column; }
+  main { flex: 1; position: relative; min-height: 0; }
+  #map { position: absolute; inset: 0; }
+  .view { position: absolute; inset: 0; }
+  [hidden] { display: none !important; }
+  #places { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
+  .inner { max-width: 640px; margin: 0 auto; }
+  .intro { padding: 20px 0 6px; }
+  .intro .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .intro h1 { font-family: var(--font-display); font-weight: 400; font-size: 36px; line-height: 1.05; margin: 6px 0 6px; }
+  .intro p { margin: 0; color: var(--muted); font-size: 16px; }
+
+  .topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 500; padding: calc(12px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; }
+  .topbar h1 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0; background: var(--panel); padding: 9px 16px; border-radius: 999px; box-shadow: 0 2px 10px rgba(0,0,0,.18); pointer-events: auto; }
+  .topbar button { pointer-events: auto; }
+  .zones { display: flex; gap: 6px; pointer-events: auto; }
+  button.pill { font: 700 15px var(--font-body); border: 0; border-radius: 999px; padding: 11px 16px; cursor: pointer; background: var(--sea); color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  button.pill.off { background: var(--muted); }
+  button.pill.light { background: var(--panel); color: var(--fg); }
+  button.pill.light[aria-pressed="true"] { background: var(--fg); color: #fff; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .status { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 500; text-align: center; pointer-events: none; padding: 0 16px; }
+  .status span { display: inline-block; background: var(--panel); padding: 8px 14px; border-radius: 999px; font-size: 15px; color: var(--muted); box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+
+  nav { flex: none; display: grid; grid-template-columns: 1fr 1fr; background: var(--panel); border-top: 1px solid var(--line); padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  nav button { font: 700 18px var(--font-body); padding: 16px 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-top: 4px solid transparent; }
+  nav button[aria-selected="true"] { color: var(--accent); border-top-color: var(--accent); }
+
+  .card { background: var(--panel); border-radius: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.07); margin-top: 18px; overflow: hidden; border: 1px solid var(--line); }
+  .card .photo { position: relative; aspect-ratio: 16 / 10; max-width: 100%; background: linear-gradient(150deg, #FCE6C4, #F7B9A2 55%, #2C8A8F); }
+  .card .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .photo .ph { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-display); font-size: 40px; color: rgba(255,255,255,.9); text-shadow: 0 2px 12px rgba(0,0,0,.2); padding: 0 20px; text-align: center; }
+  .card .photo .num { position: absolute; top: 12px; left: 12px; width: 44px; height: 44px; border-radius: 50%; color: #fff; font: 400 22px var(--font-display); display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.3); z-index: 1; }
+  .card .photo .credit { position: absolute; right: 8px; bottom: 6px; font-size: 12px; color: #fff; text-shadow: 0 0 4px #000; z-index: 1; }
+  .card .body { padding: 14px 16px 16px; }
+  .when { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+  .card h2 { font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 1.1; margin: 0 0 4px; text-wrap: balance; }
+  .card .sub { color: var(--sea); font-weight: 600; font-size: 16px; margin: 0 0 10px; }
+  .card p { margin: 0 0 10px; }
+  .card .tip { background: var(--tipbg); border-left: 4px solid var(--sea); padding: 8px 12px; border-radius: 6px; font-size: 16px; margin: 10px 0 14px; }
+  .card .tip strong { color: var(--sea); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .actions a, .actions button { flex: 1 1 140px; text-align: center; font: 700 17px var(--font-body); padding: 13px 12px; border-radius: 12px; border: 0; cursor: pointer; text-decoration: none; }
+  .actions a { background: var(--sea); color: #fff; }
+  .actions button { background: #fff; color: var(--sea); border: 2px solid var(--sea); }
+  .dist { font-size: 15px; color: var(--muted); margin: 0 0 10px; font-variant-numeric: tabular-nums; }
+  .dist:empty { display: none; }
+  .home-card { border: 2px solid var(--fg); }
+  .foot { font-size: 13px; color: var(--muted); margin-top: 24px; text-align: center; }
+
+  .pin { width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.35); display: grid; place-items: center; }
+  .pin span { transform: rotate(45deg); color: #fff; font: 400 15px var(--font-display); }
+  .pin.home { background: var(--fg); width: 40px; height: 40px; }
+  .pin.home svg { transform: rotate(45deg); width: 20px; height: 20px; fill: #fff; }
+  .me { width: 20px; height: 20px; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 7px rgba(26,115,232,.25); }
+  .leaflet-popup-content { font-family: var(--font-body); font-size: 16px; margin: 12px 16px; line-height: 1.4; }
+  .leaflet-popup-content b { font-family: var(--font-display); font-weight: 400; font-size: 20px; display: block; margin-bottom: 4px; }
+  .leaflet-popup-content .pw { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 4px; }
+  .leaflet-popup-content a, .leaflet-popup-content button { display: inline-block; margin-top: 8px; font: 700 15px var(--font-body); padding: 9px 13px; border-radius: 10px; text-decoration: none; }
+  .leaflet-popup-content a { background: var(--sea); color: #fff; }
+  .leaflet-popup-content button { background: #fff; color: var(--sea); border: 2px solid var(--sea); margin-left: 6px; cursor: pointer; }
+  .leaflet-popup-content-wrapper { border-radius: 14px; }
+  .leaflet-container a.leaflet-popup-close-button { font-size: 28px; width: 34px; height: 34px; padding: 6px 4px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <section class="view" id="mapView">
+    <div id="map" role="application" aria-label="Map of our places in Lima"></div>
+    <div class="topbar">
+      <h1>Lima in December</h1>
+      <div class="zones" role="group" aria-label="Map area">
+        <button class="pill light" id="zoneCity" type="button" aria-pressed="true">Lima</button>
+        <button class="pill light" id="zoneSouth" type="button" aria-pressed="false">South coast</button>
+      </div>
+      <button class="pill off" id="locBtn" type="button">My location</button>
+    </div>
+    <div class="status"><span id="status">Tap a pin to see the plan for that place</span></div>
+  </section>
+  <section class="view" id="places" hidden>
+    <div class="inner">
+      <div class="intro">
+        <div class="eyebrow">15 to 28 December 2026</div>
+        <h1>Our places</h1>
+        <p>In the order of the plan. "Directions" opens the route in Google Maps, "See on map" shows where it is.</p>
+      </div>
+      <div id="cards"></div>
+      <p class="foot">Photos: Wikipedia / Wikimedia Commons. Map: OpenStreetMap.</p>
+    </div>
+  </section>
+</main>
+<nav role="tablist">
+  <button type="button" role="tab" id="tabMap" aria-selected="true">Map</button>
+  <button type="button" role="tab" id="tabList" aria-selected="false">Places</button>
+</nav>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  var COLORS = { family: "#C02F69", food: "#D9921F", coast: "#1E777D", country: "#5F7E2E", stay: "#7D8E92" };
+
+  var HOME = { name: "Home", sub: "Av. Santo Toribio 185, San Isidro",
+    query: "Av. Santo Toribio 185, San Isidro, Lima, Peru", lat: null, lng: null };
+
+  var places = [
+    { n: 1, name: "Country Club Lima Hotel", sub: "Los Eucaliptos 590, San Isidro", cat: "stay",
+      when: "Tue 15 Dec · Night", lat: -12.0978, lng: -77.0432,
+      query: "Country Club Lima Hotel, Los Eucaliptos 590, San Isidro, Lima",
+      wiki: ["en:Country Club Lima Hotel", "es:Country Club Lima Hotel"],
+      text: "It opened on 8 February 1927 as a country club, with materials brought from the United States and Britain. Ernest Hemingway, Ava Gardner, John Wayne and Mick Jagger all stayed here. The English bar is known for its pisco sours.",
+      tip: "Our first night in Lima." },
+    { n: 2, name: "Club Regatas Lima", sub: "Chorrillos", cat: "family",
+      when: "Wed 16 Dec · Lunch", lat: -12.1630, lng: -77.0283,
+      query: "Club de Regatas Lima, Chorrillos, Lima",
+      wiki: ["en:Club de Regatas Lima", "es:Club de Regatas Lima"],
+      text: "Founded on 26 April 1875 as a rowing club by five young men who spent their days on the beaches of Chorrillos. Today it is the largest sports club in Peru, with teams in 32 sports.",
+      tip: "Lunch with my mom, after the office." },
+    { n: 3, name: "Punta Hermosa", sub: "Beach town, 42 km south of Lima", cat: "food",
+      when: "Thu 17 Dec · Lunch", lat: -12.3361, lng: -76.8244,
+      query: "Punta Hermosa, Lima, Peru",
+      wiki: ["en:Punta Hermosa District", "es:Distrito de Punta Hermosa"],
+      text: "A beach district on the Pan-American Highway, 42 km south of downtown Lima. Its beaches fill up with thousands of people every summer.",
+      tip: "Lunch on the way to Mala." },
+    { n: 4, name: "Mala", sub: "My country house", cat: "country",
+      when: "Thu 17 to Sun 20 Dec", lat: -12.6578, lng: -76.6311,
+      query: "Mala, Cañete, Peru",
+      wiki: ["en:Mala District", "es:Distrito de Mala"],
+      text: "Mala is a district in Cañete province, next to the Mala river. Local food includes tamales, chicharrón, sopa bruta, carapulcra and chapana, a sweet made from yuca.",
+      tip: "The pin marks the town of Mala, not the house." },
+    { n: 5, name: "Boulevard de Asia", sub: "Asia, Cañete", cat: "coast",
+      when: "Thu 17 Dec · Night", lat: -12.7816, lng: -76.6039,
+      query: "Boulevard de Asia, Asia, Cañete, Peru",
+      wiki: ["en:Asia District, Peru", "es:Distrito de Asia"],
+      text: "Asia has around 28 beaches along 8 km of coast. Its big shopping area only runs at full speed in the summer season, from December to April.",
+      tip: "Night out from Mala." },
+    { n: 6, name: "Costanera 700", sub: "Nikkei · Miraflores", cat: "food",
+      when: "Sun 20 Dec · Lunch", lat: -12.116799, lng: -77.045481,
+      query: "Costanera 700, Miraflores, Lima",
+      wiki: [],
+      text: "Humberto Sato's restaurant, one of the places where Nikkei cooking started in Lima. Nikkei is Japanese technique with Peruvian ingredients.",
+      tip: "Lunch after we come back from Mala." },
+    { n: 7, name: "Puente de los Suspiros", sub: "Barranco", cat: "coast",
+      when: "Mon 21 Dec · Day", lat: -12.14914, lng: -77.022624,
+      query: "Puente de los Suspiros, Barranco, Lima",
+      wiki: ["en:Bridge of Sighs (Lima)", "es:Puente de los Suspiros (Lima)"],
+      text: "A wooden footbridge opened on 14 February 1876. The Bajada de Baños, the path down to Barranco's beaches, runs underneath. Chabuca Granda wrote a waltz about it in 1960.",
+      tip: "Legend says: cross it holding your breath and make a wish." },
+    { n: 8, name: "Isolina Taberna Peruana", sub: "Av. San Martín 101, Barranco", cat: "food",
+      when: "Mon 21 Dec · Night", lat: -12.147634, lng: -77.02232,
+      query: "Isolina Taberna Peruana, Av. San Martín 101, Barranco, Lima",
+      wiki: [],
+      text: "A Peruvian taberna in Barranco, a short walk from the Puente de los Suspiros.",
+      tip: "Dinner after walking around Barranco." },
+    { n: 9, name: "Osaka", sub: "Av. Felipe Pardo y Aliaga 660, San Isidro", cat: "food",
+      when: "Tue 22 Dec · Night", lat: -12.1049349, lng: -77.0387573,
+      query: "Osaka, Av. Felipe Pardo y Aliaga 660, San Isidro, Lima",
+      wiki: [],
+      text: "Nikkei restaurant in San Isidro.",
+      tip: "Dinner." },
+    { n: 10, name: "Larcomar", sub: "Malecón de la Reserva 610, Miraflores", cat: "coast",
+      when: "Wed 23 Dec · Day", lat: -12.1319, lng: -77.0304,
+      query: "Larcomar, Malecón de la Reserva 610, Miraflores, Lima",
+      wiki: ["en:Larcomar", "es:Larcomar"],
+      text: "Opened on 27 November 1998, dug into the cliff above the Pacific. The name joins Larco, the avenue it sits at the end of, and mar, Spanish for sea.",
+      tip: "From here we walk along the Malecón." },
+    { n: 11, name: "Malecón and El Beso", sub: "Parque del Amor, Miraflores", cat: "coast",
+      when: "Wed 23 Dec · Day", lat: -12.1272, lng: -77.0373,
+      query: "Parque del Amor, Miraflores, Lima",
+      wiki: ["es:Parque del Amor (Miraflores)", "en:Malecón de Miraflores", "es:Malecón de Miraflores"],
+      text: "The path along the cliffs of Miraflores. In the Parque del Amor stands El Beso, the giant kissing couple by Peruvian artist Víctor Delfín.",
+      tip: "Walk from Larcomar." }
+  ];
+
+  // ----- Map -----
+  var map = L.map("map", { zoomControl: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" }).addTo(map);
+
+  var CITY = L.latLngBounds([[-12.092, -77.050], [-12.166, -77.018]]);
+  var SOUTH = L.latLngBounds([[-12.30, -76.85], [-12.80, -76.58]]);
+  map.fitBounds(CITY, { padding: [30, 30] });
+
+  function gmaps(q) { return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(q) + "&travelmode=driving"; }
+  var HOUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 11h3v9h5v-6h4v6h5v-9h3z"/></svg>';
+
+  var markers = {};
+  places.forEach(function (p) {
+    var icon = L.divIcon({ className: "", html: '<div class="pin" style="background:' + COLORS[p.cat] + '"><span>' + p.n + "</span></div>", iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -32] });
+    markers[p.n] = L.marker([p.lat, p.lng], { icon: icon, title: p.name }).addTo(map)
+      .bindPopup('<span class="pw">' + p.when + "</span><b>" + p.n + ". " + p.name + "</b>" + p.sub +
+        '<br><a href="' + gmaps(p.query) + '" target="_blank" rel="noopener">Directions</a><button type="button" onclick="showCard(' + p.n + ')">Read more</button>', { maxWidth: 280 });
+  });
+
+  // ----- Cards -----
+  var cards = document.getElementById("cards");
+  function cardHTML(p, isHome) {
+    var id = isHome ? "home" : p.n;
+    var badge = isHome ? '<span class="num" style="background:var(--fg)">' + HOUSE.replace('aria-hidden="true"', 'aria-hidden="true" width="22" height="22" fill="#fff"') + "</span>"
+                       : '<span class="num" style="background:' + COLORS[p.cat] + '">' + p.n + "</span>";
+    return '<div class="photo"><img id="img-' + id + '" alt="" hidden><div class="ph" id="ph-' + id + '">' + p.name + "</div>" + badge +
+      '<span class="credit" id="credit-' + id + '"></span></div>' +
+      '<div class="body">' + (p.when ? '<p class="when">' + p.when + "</p>" : "") +
+      "<h2>" + p.name + '</h2><p class="sub">' + p.sub + "</p>" +
+      '<p class="dist" id="dist-' + id + '"></p>' +
+      (p.text ? "<p>" + p.text + "</p>" : "") +
+      (p.tip ? '<div class="tip"><strong>In our plan:</strong> ' + p.tip + "</div>" : "") +
+      '<div class="actions"><a href="' + gmaps(p.query) + '" target="_blank" rel="noopener">Directions</a><button type="button" onclick="showOnMap(\'' + id + '\')">See on map</button></div></div>';
+  }
+  var hc = document.createElement("article");
+  hc.className = "card home-card"; hc.id = "card-home";
+  HOME.text = "Where we stay in Lima.";
+  hc.innerHTML = cardHTML(HOME, true);
+  cards.appendChild(hc);
+  places.forEach(function (p) {
+    var c = document.createElement("article");
+    c.className = "card"; c.id = "card-" + p.n;
+    c.innerHTML = cardHTML(p, false);
+    cards.appendChild(c);
+  });
+
+  // ----- Photos from Wikipedia (loaded at view time) -----
+  function loadPhoto(p) {
+    var i = 0;
+    function next() {
+      if (!p.wiki || i >= p.wiki.length) return;
+      var ref = p.wiki[i++], lang = ref.slice(0, 2), title = ref.slice(3);
+      fetch("https://" + lang + ".wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(title.replace(/ /g, "_")))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var src = d && (d.originalimage || d.thumbnail);
+          if (!src) return next();
+          var url = src.source.replace(/\/\d+px-/, "/900px-");
+          if (!/\/thumb\//.test(url)) url = src.source;
+          var img = document.getElementById("img-" + p.n);
+          img.onload = function () { document.getElementById("ph-" + p.n).hidden = true; };
+          img.onerror = function () { img.onerror = null; img.src = src.source; };
+          img.src = url; img.hidden = false;
+          document.getElementById("credit-" + p.n).textContent = "Photo: Wikipedia";
+        })
+        .catch(next);
+    }
+    next();
+  }
+  places.forEach(loadPhoto);
+
+  // ----- Home: located from the address when the page opens -----
+  var homeMarker = null;
+  function km(a, b, c, d) {
+    var R = 6371, dLat = (c - a) * Math.PI / 180, dLng = (d - b) * Math.PI / 180;
+    var x = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a * Math.PI / 180) * Math.cos(c * Math.PI / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }
+  function fmt(d) { return d < 1 ? Math.round(d * 1000) + " m" : d.toFixed(d < 10 ? 1 : 0) + " km"; }
+  function placeHome(lat, lng) {
+    HOME.lat = lat; HOME.lng = lng;
+    var icon = L.divIcon({ className: "", html: '<div class="pin home">' + HOUSE + "</div>", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -38] });
+    homeMarker = L.marker([lat, lng], { icon: icon, title: "Home", zIndexOffset: 500 }).addTo(map)
+      .bindPopup('<span class="pw">Home</span><b>Home</b>' + HOME.sub + '<br><a href="' + gmaps(HOME.query) + '" target="_blank" rel="noopener">Directions</a><button type="button" onclick="showCard(\'home\')">Read more</button>', { maxWidth: 280 });
+    places.forEach(function (p) {
+      var el = document.getElementById("dist-" + p.n);
+      if (!el.dataset.me) el.textContent = fmt(km(lat, lng, p.lat, p.lng)) + " from home";
+    });
+  }
+  function geocode(params) {
+    return fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=pe&" + params, { headers: { "Accept-Language": "es" } })
+      .then(function (r) { return r.ok ? r.json() : []; });
+  }
+  geocode("street=" + encodeURIComponent("185 Avenida Santo Toribio") + "&city=" + encodeURIComponent("San Isidro"))
+    .then(function (res) {
+      if (res && res.length) return res;
+      return geocode("q=" + encodeURIComponent("Avenida Santo Toribio 185, San Isidro, Lima"));
+    })
+    .then(function (res) {
+      if (res && res.length) placeHome(parseFloat(res[0].lat), parseFloat(res[0].lon));
+    })
+    .catch(function () {});
+
+  // ----- Tabs -----
+  var mapView = document.getElementById("mapView"), placesView = document.getElementById("places");
+  var tabMap = document.getElementById("tabMap"), tabList = document.getElementById("tabList");
+  function show(which) {
+    var isMap = which === "map";
+    mapView.hidden = !isMap; placesView.hidden = isMap;
+    tabMap.setAttribute("aria-selected", isMap); tabList.setAttribute("aria-selected", !isMap);
+    if (isMap) setTimeout(function () { map.invalidateSize(); }, 50);
+  }
+  tabMap.addEventListener("click", function () { show("map"); });
+  tabList.addEventListener("click", function () { show("list"); });
+  window.showOnMap = function (id) {
+    show("map");
+    setTimeout(function () {
+      if (id === "home") {
+        if (homeMarker) { map.flyTo(homeMarker.getLatLng(), 16); homeMarker.openPopup(); }
+        else { document.getElementById("status").textContent = "Couldn't place home on the map. Use Directions."; }
+        return;
+      }
+      var p = places[id - 1];
+      map.flyTo([p.lat, p.lng], p.cat === "country" ? 13 : 16); markers[id].openPopup();
+    }, 80);
+  };
+  window.showCard = function (id) {
+    show("list");
+    document.getElementById("card-" + id).scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // ----- Map areas -----
+  var zc = document.getElementById("zoneCity"), zs = document.getElementById("zoneSouth");
+  zc.addEventListener("click", function () { map.flyToBounds(CITY, { padding: [30, 30] }); zc.setAttribute("aria-pressed", "true"); zs.setAttribute("aria-pressed", "false"); });
+  zs.addEventListener("click", function () { map.flyToBounds(SOUTH, { padding: [30, 30] }); zs.setAttribute("aria-pressed", "true"); zc.setAttribute("aria-pressed", "false"); });
+
+  // ----- Location -----
+  var meMarker = null, status = document.getElementById("status"), btn = document.getElementById("locBtn");
+  function onPos(pos) {
+    var lat = pos.coords.latitude, lng = pos.coords.longitude;
+    if (!meMarker) {
+      meMarker = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: '<div class="me"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), zIndexOffset: 1000 }).addTo(map).bindPopup("You are here");
+      map.setView([lat, lng], 15);
+    } else { meMarker.setLatLng([lat, lng]); }
+    status.textContent = "Your location is on";
+    btn.classList.remove("off"); btn.textContent = "Center on me";
+    places.forEach(function (p) {
+      var el = document.getElementById("dist-" + p.n);
+      el.dataset.me = "1";
+      el.textContent = fmt(km(lat, lng, p.lat, p.lng)) + " from where you are";
+    });
+    if (HOME.lat !== null) document.getElementById("dist-home").textContent = fmt(km(lat, lng, HOME.lat, HOME.lng)) + " from where you are";
+  }
+  function onErr(err) {
+    status.textContent = err.code === 1 ? "Location is off. Turn it on in your browser settings." : "Couldn't get your location.";
+    btn.classList.add("off"); btn.textContent = "My location";
+  }
+  btn.addEventListener("click", function () {
+    if (!navigator.geolocation) { status.textContent = "This browser has no location."; return; }
+    if (meMarker) { map.flyTo(meMarker.getLatLng(), 16); return; }
+    status.textContent = "Finding your location...";
+    navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+  });
+</script>
+</body>
+</html>
